@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Refrigo - 冷蔵庫管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- LINE Login SDK / Firebase / OCR -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    body { font-family: sans-serif; padding: 1rem; max-width: 600px; margin: auto; }
+    h2 { margin-top: 2rem; }
+    input, button, textarea { margin: 0.5rem 0; padding: 0.5rem; width: 100%; }
+    .item { border-bottom: 1px solid #ccc; padding: 0.5rem 0; }
+    .tab { display: none; }
+    .tab.active { display: block; }
+    .nav { display: flex; gap: 1rem; margin-bottom: 1rem; }
+    .nav button { flex: 1; padding: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Refrigo - 冷蔵庫管理</h1>
+
+  <div id="loginStatus">LINEログイン中...</div>
+
+  <div class="nav">
+    <button onclick="switchTab('fridge')">冷蔵庫</button>
+    <button onclick="switchTab('add')">追加</button>
+    <button onclick="switchTab('ocr')">OCR</button>
+    <button onclick="switchTab('shopping')">買い物</button>
+  </div>
+
+  <div id="fridge" class="tab active">
+    <h2>冷蔵庫の中身</h2>
+    <div id="fridgeList"></div>
+  </div>
+
+  <div id="add" class="tab">
+    <h2>手動追加</h2>
+    <input type="text" id="nameInput" placeholder="食材名">
+    <input type="date" id="dateInput">
+    <input type="number" id="qtyInput" placeholder="数量" min="1" value="1">
+    <button onclick="addItem()">追加</button>
+  </div>
+
+  <div id="ocr" class="tab">
+    <h2>OCR登録</h2>
+    <input type="file" id="ocrInput" accept="image/*">
+    <div id="ocrResult"></div>
+    <button onclick="processOCR()">OCR実行</button>
+  </div>
+
+  <div id="shopping" class="tab">
+    <h2>買い物リスト</h2>
+    <input type="text" id="shoppingInput" placeholder="買うもの">
+    <button onclick="addToShopping()">追加</button>
+    <div id="shoppingList"></div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let userId = null;
+
+    // LINEログイン
+    liff.init({ liffId: "YOUR_LIFF_ID" }).then(() => {
+      if (!liff.isLoggedIn()) {
+        liff.login();
+      } else {
+        liff.getProfile().then(profile => {
+          userId = profile.userId;
+          document.getElementById("loginStatus").innerText = "こんにちは " + profile.displayName;
+          loadFridge();
+          loadShoppingList();
+        });
+      }
+    });
+
+    // タブ切替
+    function switchTab(tab) {
+      document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+      document.getElementById(tab).classList.add("active");
+    }
+
+    // 冷蔵庫追加
+    function addItem() {
+      const name = document.getElementById("nameInput").value;
+      const date = document.getElementById("dateInput").value;
+      const qty = parseInt(document.getElementById("qtyInput").value);
+      if (!name || !date || !qty) return alert("全て入力してください");
+
+      db.collection("users").doc(userId).collection("fridge").add({
+        name, date, qty, created: new Date()
+      }).then(() => {
+        loadFridge();
+        alert("追加されました");
+      });
+    }
+
+    // 冷蔵庫一覧取得
+    function loadFridge() {
+      db.collection("users").doc(userId).collection("fridge").orderBy("date").get().then(snapshot => {
+        const container = document.getElementById("fridgeList");
+        container.innerHTML = "";
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const div = document.createElement("div");
+          div.className = "item";
+          div.innerHTML = `${data.name} (${data.qty}) - ${data.date}
+            <button onclick="deleteItem('${doc.id}')">削除</button>`;
+          container.appendChild(div);
+        });
+      });
+    }
+
+    function deleteItem(id) {
+      db.collection("users").doc(userId).collection("fridge").doc(id).delete().then(loadFridge);
+    }
+
+    // 買い物リスト追加
+    function addToShopping() {
+      const name = document.getElementById("shoppingInput").value;
+      if (!name) return;
+      db.collection("users").doc(userId).collection("shopping").add({
+        name, created: new Date()
+      }).then(() => {
+        loadShoppingList();
+        document.getElementById("shoppingInput").value = "";
+      });
+    }
+
+    function loadShoppingList() {
+      db.collection("users").doc(userId).collection("shopping").orderBy("created").get().then(snapshot => {
+        const container = document.getElementById("shoppingList");
+        container.innerHTML = "";
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const div = document.createElement("div");
+          div.className = "item";
+          div.innerHTML = `${data.name}
+            <button onclick="checkItem('${doc.id}', '${data.name}')">チェック</button>`;
+          container.appendChild(div);
+        });
+      });
+    }
+
+    function checkItem(id, name) {
+      // 買い物チェック → 冷蔵庫に追加
+      db.collection("users").doc(userId).collection("fridge").add({
+        name, date: new Date().toISOString().slice(0,10), qty: 1, created: new Date()
+      });
+      db.collection("users").doc(userId).collection("shopping").doc(id).delete().then(loadShoppingList);
+    }
+
+    // OCR処理
+    function processOCR() {
+      const input = document.getElementById("ocrInput");
+      if (!input.files[0]) return alert("画像を選択してください");
+
+      Tesseract.recognize(input.files[0], 'jpn').then(({ data: { text } }) => {
+        const lines = text.split('\n').map(t => t.trim()).filter(t => t);
+        document.getElementById("ocrResult").innerText = lines.join('\n');
+
+        const items = lines.filter(line => /\d{4}[-\/.]\d{2}[-\/.]\d{2}/.test(line));
+        items.forEach(line => {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 2) {
+            const name = parts[0];
+            const date = parts[1].replace(/[.]/g, '-');
+            db.collection("users").doc(userId).collection("fridge").add({
+              name, date, qty: 1, created: new Date()
+            });
+          }
+        });
+
+        // LINE通知
+        fetch("https://YOUR_SERVER/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: userId,
+            message: "OCRから以下の食材が登録されました：\n" + lines.join('\n')
+          })
+        });
+      });
+    }
+  </script>
+</body>
+</html>
