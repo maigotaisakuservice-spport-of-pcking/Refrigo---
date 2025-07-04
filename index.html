@@ -194,12 +194,15 @@
       `${i + 1}. ${item.name}（期限: ${item.date}）`
     ).join('\n');
 
-    fetch("https://YOUR_SERVER/notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId: userId,
-        message: `📦 OCRで以下の食材が登録されました:\n${msg}`
+    liff.sendMessages([{
+        type: "text",
+        text: `OCR結果：\n${msg}`
+      }]).then(() => {
+        alert("LINEに送信しました！");
+      }).catch(err => {
+        alert("送信失敗：" + err.message);
+      });
+    });
       })
     });
   });
