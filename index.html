@@ -166,47 +166,39 @@
       db.collection("users").doc(userId).collection("shopping").doc(id).delete().then(loadShoppingList);
     }
 
-    // OCR処理
-    function processOCR() {
-  const input = document.getElementById("ocrInput");
-  if (!input.files[0]) return alert("画像を選択してください");
+        // OCR処理  
+    function processOCR() {  
+      const input = document.getElementById("ocrInput");  
+      if (!input.files[0]) return alert("画像を選択してください");  
+  
+      Tesseract.recognize(input.files[0], 'jpn').then(({ data: { text } }) => {  
+        const lines = text.split('\n').map(t => t.trim()).filter(t => t);  
+        document.getElementById("ocrResult").innerText = lines.join('\n');  
+  
+        const items = lines.filter(line => /\d{4}[-\/.]\d{2}[-\/.]\d{2}/.test(line));  
+        items.forEach(line => {  
+          const parts = line.split(/\s+/);  
+          if (parts.length >= 2) {  
+            const name = parts[0];  
+            const date = parts[1].replace(/[.]/g, '-');  
+            db.collection("users").doc(userId).collection("fridge").add({  
+              name, date, qty: 1, created: new Date()  
+            });  
+          }  
+        });  
+  
+        // LINE通知  
+        fetch("https://YOUR_SERVER/notify", {  
+          method: "POST",  
+          headers: { "Content-Type": "application/json" },  
+          body: JSON.stringify({  
+            userId: userId,  
+            message: "OCRから以下の食材が登録されました：\n" + lines.join('\n')  
+          })  
+        });  
+      });  
+    }
 
-  Tesseract.recognize(input.files[0], 'jpn').then(({ data: { text } }) => {
-    const lines = text.split('\n').map(t => t.trim()).filter(t => t);
-    document.getElementById("ocrResult").innerText = lines.join('\n');
-
-    const detectedItems = [];
-
-    lines.filter(line => /\d{4}[-\/.]\d{2}[-\/.]\d{2}/.test(line)).forEach(line => {
-      const parts = line.split(/\s+/);
-      if (parts.length >= 2) {
-        const name = parts[0];
-        const date = parts[1].replace(/[./]/g, '-');
-        const item = { name, date, qty: 1, created: new Date() };
-        detectedItems.push(item);
-
-        db.collection("users").doc(userId).collection("fridge").add(item);
-      }
-    });
-
-    // 通知メッセージを構築
-    const msg = detectedItems.map((item, i) =>
-      `${i + 1}. ${item.name}（期限: ${item.date}）`
-    ).join('\n');
-
-    liff.sendMessages([{
-        type: "text",
-        text: `OCR結果：\n${msg}`
-      }]).then(() => {
-        alert("LINEに送信しました！");
-      }).catch(err => {
-        alert("送信失敗：" + err.message);
-      });
-    });
-      })
-    });
-  });
-}
   </script>
 </body>
 </html>
